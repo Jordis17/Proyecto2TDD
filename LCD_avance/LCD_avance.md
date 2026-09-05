@@ -1,1 +1,1 @@
-#Períferico LCD
+# Períferico LCD
