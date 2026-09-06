@@ -191,8 +191,6 @@ Los 3 segundos que debe mostrarse el resultado se cuentan desde que termina el r
 
 ## Referencias
 
-## Referencias
-
 [1] Hitachi Ltd., *HD44780U (LCD-II): Dot Matrix Liquid Crystal Display Controller/Driver*, Rev. 0.0, Hitachi Semiconductor, Sep. 1999. [En línea]. Disponible: https://cdn.sparkfun.com/assets/9/5/f/7/b/HD44780.pdf
 
 [2] Digilent Inc., *PmodCLP Reference Manual*, Digilent Inc. [En línea]. Disponible: https://digilent.com/reference/_media/pmod:pmod:pmodclp_rm.pdf
