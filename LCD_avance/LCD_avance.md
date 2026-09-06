@@ -126,4 +126,77 @@ Esa es la que vuelve de `DONE` a `IDLE`, con la etiqueta "se acepta el próximo 
 **Pendiente de verificar en el RTL:** los comandos `clear` y `home` que llegan por el registro CONTROL/ESTADO ejecutan la misma instrucción del HD44780 que se usa durante el arranque (`Clear Display` y `Return Home`), así que deberían esperar también el tiempo largo (2 ms), no el corto de 60 µs que se usa para escribir un carácter normal. Hay que asegurarse de que el estado `WAIT_POST` seleccione el valor correcto del temporizador según qué comando se ejecutó.
 Se encuentra bajo trabajo para la implementación final de los sistemas.
 
+**Códigos de las instrucciones usadas en el arranque:**
 
+| Instrucción | Código (hex) | Espera después |
+|---|---|---|
+| Function Set (8 bits, 2 líneas, 5x8) | `0x38` | 60 µs |
+| Display On/Off (display on, cursor off) | `0x0C` | 60 µs |
+| Clear Display | `0x01` | 2 ms |
+| Entry Mode Set (incremento, sin shift) | `0x06` | — |
+
+### Bloque: Temporizador Multiplexado
+
+- **Objetivo:** dar los distintos tiempos de espera usando un solo contador.
+- **Entradas:** orden de carga y selección del valor.
+- **Salidas:** aviso de tiempo cumplido.
+- **Explicación:** con reloj de 100 MHz (ciclos de 10 ns), un contador de 23 bits alcanza para el valor más grande que se necesita (50 ms). Los valores que puede cargar son:
+
+| Selección | Tiempo | Ciclos de reloj |
+|---|---|---|
+| `00` | 50 ms | 5,000,000 |
+| `01` | 2 ms | 200,000 |
+| `10` | 60 µs | 6,000 |
+| `11` | 1 µs (ancho del pulso E) | 100 |
+
+### Explicación de funcionamiento en conjunto
+
+Al encender, la FSM le pide al Temporizador cargar 50 ms y espera. Cuando el Temporizador avisa que el tiempo se cumplió, la FSM manda las instrucciones de arranque una por una, esperando el tiempo correcto después de cada una. Al terminar, pasa a `IDLE` y baja `busy`.
+
+Cuando el sistema del juego quiere escribir algo, escribe el dato y después el comando `start`. La FSM sube `busy`, arma la señal en `lcd_data`, sube `rs` si corresponde, hace el pulso de `E` (200 ns de margen antes, 1 µs en alto, 1 µs en bajo — el dato se captura en el flanco de bajada), espera el tiempo posterior, y finalmente sube `done` y vuelve a `IDLE`.
+
+---
+
+## Pantallas del LCD
+
+| Pantalla | Línea 0 | Línea 1 |
+|---|---|---|
+| Selección de modo | `AHORCADO   V:nn` | `MODO: FACIL` / `MODO: DIFICIL` |
+| Partida en curso | patrón de la palabra (ej. `A______`) | `INTENTOS: 6   F` (intentos y modo) |
+| Resultado | `GANASTE!` / `PERDISTE` | (según se defina) |
+
+Direcciones DDRAM: fila 0 en `0x00` (comando `0x80` para posicionar), fila 1 en `0x40` (comando `0xC0`).
+
+**Cuándo se redibuja la pantalla** (nunca en un lazo continuo, porque eso produciría parpadeo y dejaría `busy` activo casi todo el tiempo):
+
+- Al entrar a la pantalla de selección
+- Al cambiar de modo (FACIL/DIFICIL)
+- Al iniciar la partida
+- Al evaluar una letra que cambia el patrón o los intentos
+- Al entrar a la pantalla de resultado
+- Al actualizar el contador de partidas ganadas
+
+Los 3 segundos que debe mostrarse el resultado se cuentan desde que termina el redibujado (no desde que se entra al estado), para asegurar que se vean los 3 segundos completos.
+
+---
+
+## Pendientes para la completar la sección
+
+- [ ] Confirmar en el RTL que `clear` y `home` usan el temporizador de 2 ms, no el de 60 µs.
+- [ ] Diseñar el banco de pruebas (testbench) autoverificable de este periférico.
+- [ ] Simulación post-implementación temporizada, cubriendo al menos una escritura completa de carácter.
+- [ ] Verificar con el linter de síntesis que no aparezcan latches no intencionados.
+
+---
+
+## Referencias
+
+## Referencias
+
+[1] Hitachi Ltd., *HD44780U (LCD-II): Dot Matrix Liquid Crystal Display Controller/Driver*, Rev. 0.0, Hitachi Semiconductor, Sep. 1999. [En línea]. Disponible: https://cdn.sparkfun.com/assets/9/5/f/7/b/HD44780.pdf
+
+[2] Digilent Inc., *PmodCLP Reference Manual*, Digilent Inc. [En línea]. Disponible: https://digilent.com/reference/_media/pmod:pmod:pmodclp_rm.pdf
+
+[3] J. González-Gómez y R. Coto Calderón, "Proyecto 2: Ahorcado — Juego electrónico FPGA/PC por enlace serial," EL3313 Taller de Diseño Digital, Escuela de Ingeniería Electrónica, Instituto Tecnológico de Costa Rica, II Semestre 2026.
+
+[4] M. A. Hernández R., "Diseño Modular," Laboratorio de Diseño Lógico, Escuela de Ingeniería Electrónica, Instituto Tecnológico de Costa Rica.
