@@ -67,3 +67,63 @@ El sistema principal no toca los pines del LCD directamente. En vez de eso, escr
 Cuando se enciende la FPGA, la FSM arranca sola la secuencia de inicialización del LCD usando el Temporizador para esperar los tiempos correctos. Una vez lista, queda en espera. El sistema del juego escribe un carácter o comando en la Interfaz de Registros, la FSM lo toma, genera la señal física correspondiente en el LCD, espera lo que haga falta, y avisa que terminó. Mientras tanto, el sistema del juego puede consultar el bit `busy` para saber si ya puede mandar la siguiente orden.
 
 ---
+
+## Diagrama de tercer nivel
+
+### Bloque: Decodificador de Direcciones y Registros
+
+- **Objetivo:** guardar de forma segura el dato de configuración y responder las lecturas del bus.
+- **Entradas:** `clk_i`, `rst_i`, `write_enable_i`, `addr_i`, `wdata_i`, `busy` y `done` de la FSM.
+- **Salidas:** `rdata_o`, pulsos `start`/`clear`/`home` (W1P), y los registros `rs` y `data_byte` guardados.
+- **Explicación:** solo se usan las direcciones `00` y `01`. Los bits W1P se implementan con un flip-flop que se pone en 1 el mismo ciclo en que se escribe, y se limpia automáticamente al ciclo siguiente (o cuando la FSM lo consume).
+
+### FSM de Control (detallada)
+
+- **Objetivo:** ejecutar paso a paso tanto el arranque como cada operación individual del LCD.
+- **Entradas:** pulsos de comando, `rs`, `data_byte`, aviso de tiempo cumplido.
+- **Salidas:** `lcd_rs`, `lcd_e`, `lcd_data`, `busy`, `done`, orden de carga del temporizador y qué valor cargar.
+
+**Estados propuestos:**
+
+![LCD_tercer_nivel](LCD_img/diagramas_lcd_page-0003.jpg)
+
+### Explicando la imagen anterior para cada estado
+
+**Bloque 1: la secuencia de arranque (se ejecuta una sola vez, al encender)**
+
+Estos cinco estados corren automáticamente, sin que nadie les pida nada, apenas se enciende la FPGA:
+
+- **POWER_ON_DELAY** — espera 50 ms antes de tocar el LCD. El HD44780 necesita tiempo para estabilizarse eléctricamente después de que le llega la alimentación; si le mandas comandos antes, no responde bien.
+- **FUNCTION_SET** — manda el comando `0x38`, que le dice al LCD "vas a trabajar con bus de 8 bits, 2 líneas, letras de 5x8 puntos". Espera 60 µs después de mandarlo.
+- **DISPLAY_ONOFF** — manda `0x0C`: enciende la pantalla y apaga el cursor visible. Otros 60 µs de espera.
+- **INIT_CLEAR** — manda `0x01` (Clear Display), que borra toda la pantalla y regresa la posición de escritura al inicio. Este tarda más: 2 ms, porque internamente el controlador tiene que limpiar toda su memoria de caracteres.
+- **ENTRY_MODE** — manda `0x06`: le dice al LCD que cada vez que reciba un carácter, avance el cursor automáticamente hacia la derecha (y no haga "shift" de toda la pantalla).
+
+Al terminar `ENTRY_MODE`, el LCD ya quedó completamente configurado y listo para usarse.
+
+**IDLE — el estado de reposo**
+
+Aquí es donde la FSM se queda esperando. No hace nada hasta que el resto del sistema (la lógica del juego) le manda una orden escribiendo el bit `start` en el registro de control. Todo el tiempo que la FSM está aquí, el bit `busy` está en 0 — el sistema sabe que puede mandar una nueva operación.
+
+**Bloque 2: escribir un carácter o comando (se repite cada vez que hay algo nuevo que mostrar)**
+
+Cuando llega `start_pulso`, la FSM sale de IDLE y hace esta secuencia:
+
+- **DATA_SETUP** — deja el byte a escribir y la señal `RS` (comando o dato) estables en las líneas antes de mover nada más. Espera 200 ns — es el tiempo de margen que ustedes mismos decidieron poner, porque ni el manual del PmodCLP ni el datasheet del controlador dan ese dato exacto.
+- **E_HIGH** — sube el pin `E` (Enable) a 1 durante 1 µs. Mientras `E` está en alto, el dato ya tiene que estar estable en las líneas.
+- **E_LOW** — baja `E` a 0, también por 1 µs. Este es el momento clave: el HD44780 captura el dato justo en el flanco de bajada de `E`, o sea, en la transición de este estado.
+- **WAIT_POST** — espera el tiempo que el LCD necesita para procesar internamente lo que acaba de recibir: 60 µs si fue un carácter normal, o 2 ms si lo que se mandó fue un `clear` o un `home` (que son comandos más "pesados" para el controlador, igual que `INIT_CLEAR` arriba).
+
+**DONE**
+
+Cuando termina la espera, la FSM llega aquí y activa el bit `done` — le avisa al resto del sistema que la operación ya se completó y que puede revisar el resultado o pedir la siguiente.
+
+**La flecha larga de la derecha**
+
+Esa es la que vuelve de `DONE` a `IDLE`, con la etiqueta "se acepta el próximo start_pulso". No es una transición automática por tiempo (como las otras) — la FSM se queda en `DONE` hasta que el sistema externo manda la siguiente orden (`start_pulso`), y ahí recién regresa a `IDLE` para repetir el ciclo. Es literalmente el mismo camino que ya siguió una vez el flujo de `IDLE → DATA_SETUP → ... → DONE`, solo que dibujado como el retorno del lazo en vez de repetir todos los cuadros de nuevo.
+
+
+**Pendiente de verificar en el RTL:** los comandos `clear` y `home` que llegan por el registro CONTROL/ESTADO ejecutan la misma instrucción del HD44780 que se usa durante el arranque (`Clear Display` y `Return Home`), así que deberían esperar también el tiempo largo (2 ms), no el corto de 60 µs que se usa para escribir un carácter normal. Hay que asegurarse de que el estado `WAIT_POST` seleccione el valor correcto del temporizador según qué comando se ejecutó.
+Se encuentra bajo trabajo para la implementación final de los sistemas.
+
+
