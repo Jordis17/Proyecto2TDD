@@ -1,6 +1,6 @@
 # Primer Avance de Diseño: Módulo de Control y Máquina de Estados (FSM)
 
-## 1. Módulo del Controlador del Juego (`game_controller`)
+## 1. Diagrama del Controlador del Juego (`game_controller`)
 
 El módulo del controlador funciona como la unidad central de procesado del juego. Su objetivo principal es gestionar la lógica global del sistema, coordinando las interacciones entre las entradas del usuario y los periféricos de salida (pantalla LCD, comunicación UART y efectos de sonido).
 
