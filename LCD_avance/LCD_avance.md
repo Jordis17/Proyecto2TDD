@@ -3,7 +3,7 @@
 
 ### Objetivo
 
-Mostrar la relación general entre el sistema de control del juego y la pantalla LCD, sin entrar en detalles internos.
+Mostrar la relación general entre el sistema de control del juego y la pantalla LCD.
 
 ### Entradas
 
