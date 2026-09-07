@@ -46,7 +46,7 @@ muestra el resultado durante tres segundos y el sistema vuelve solo a la pantall
 
 ## 2. Diagrama de primer nivel
 
-![Diagrama de primer nivel](Diagramas/nivel1.png)
+![Diagrama de primer nivel](Diagramas/nivel1.jpeg)
 
 **Objetivo.** Realizar una partida completa de ahorcado: presentar la selección de dificultad,
 elegir la palabra, recibir letras desde la PC, validarlas, llevar el tiempo y los intentos,
@@ -93,7 +93,7 @@ dos líneas serie, y todo lo que hace es enviar una letra y mostrar lo que la FP
 
 ## 3. Diagrama de segundo nivel
 
-![Diagrama de segundo nivel](Diagramas/nivel2.png)
+![Diagrama de segundo nivel](Diagramas/nivel2.jpeg)
 
 El sistema se subdivide en cuatro bloques generales dentro de la FPGA, más dos elementos externos:
 la aplicación de PC y el módulo LCD. Las etiquetas del diagrama agrupan las señales por familias;
