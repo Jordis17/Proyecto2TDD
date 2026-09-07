@@ -66,7 +66,7 @@ Cuando se enciende la FPGA, la FSM arranca sola la secuencia de inicialización 
 
 ---
 
-## Diagrama de tercer nivel
+## Diagrama de FSM más lógica propuesto
 
 ### Bloque: Decodificador de Direcciones y Registros
 
