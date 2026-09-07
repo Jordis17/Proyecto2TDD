@@ -43,22 +43,22 @@ El sistema principal no toca los pines del LCD directamente. En vez de eso, escr
 
 - **Objetivo:** decodificar la dirección del bus y guardar lo que el sistema quiere hacer (escribir un carácter, borrar pantalla, etc.).
 - **Entradas:** `clk_i`, `rst_i`, `write_enable_i`, `addr_i`, `wdata_i`, y las banderas `busy`/`done` que le manda la FSM.
-- **Salidas:** `rdata_o`, y hacia la FSM: el byte a enviar, el valor de `rs`, y pulsos de un ciclo quue indican "hacé start/clear/home".
-- **Explicación:** este bloque separa el protocolo del bus de 32 bits de la lógica interna del LCD. Los bits `start`, `clear` y `home` son de tipo "escribir un 1 para generar un pulso" (W1P): se ponen en 1 por un instante y se limpian solos.
+- **Salidas:** `rdata_o`, y hacia la FSM: el byte a enviar, el valor de `rs`, y pulsos de un ciclo quue indican "start/clear/home".
+Este bloque separa el protocolo del bus de 32 bits de la lógica interna del LCD. Los bits `start`, `clear` y `home` son de tipo "escribir un 1 para generar un pulso" (W1P): se ponen en 1 por un instante y se limpian solos.
 
 ### FSM de Control
 
 - **Objetivo:** manejar toda la secuencia de arranque del LCD y la ejecución de cada comando (escritura de carácter, clear, home), respetando los tiempos de espera del HD44780.
 - **Entradas:** los comandos de la Interfaz de Registros, y el aviso de "tiempo cumplido" del Temporizador.
 - **Salidas:** `lcd_rs`, `lcd_e`, `lcd_data`, las banderas `busy`/`done`, y las señales de control hacia el Temporizador.
-- **Explicación:** es el bloque que realmente "sabe" cómo hablarle al LCD. Al encender, hace la secuencia de arranque sin que nadie se lo pida. Después queda esperando comandos, y por cada uno que recibe repite el mismo patrón: preparar el dato, generar el pulso de `E`, y esperar el tiempo que corresponda antes de aceptar el siguiente.
+Al encender, hace la secuencia de arranque sin necesidad de instrucción externa. Después queda esperando comandos, y por cada uno que recibe repite el mismo patrón: preparar el dato, generar el pulso de `E`, y esperar el tiempo que corresponda antes de aceptar el siguiente.
 
 ### Temporizador
 
 - **Objetivo:** generar las esperas que pide el HD44780 sin necesitar varios contadores separados.
 - **Entradas:** orden de cargar un valor y cuál valor cargar, desde la FSM.
 - **Salidas:** aviso de que el tiempo ya pasó.
-- **Explicación:** en vez de un contador por cada tiempo distinto (lo cual gastaría más recursos de la FPGA), se usa un solo contador descendente que se puede cargar con distintos valores según lo que pida la FSM en cada momento.
+En vez de un contador por cada tiempo distinto, se usa un solo contador descendente que se puede cargar con distintos valores según lo que pida la FSM en cada momento.
 
 ### Explicación general del sistema
 
@@ -66,16 +66,16 @@ Cuando se enciende la FPGA, la FSM arranca sola la secuencia de inicialización 
 
 ---
 
-## Diagrama de FSM más lógica propuesto
+## Diagrama de FSM más lógica propuesta
 
 ### Bloque: Decodificador de Direcciones y Registros
 
 - **Objetivo:** guardar de forma segura el dato de configuración y responder las lecturas del bus.
 - **Entradas:** `clk_i`, `rst_i`, `write_enable_i`, `addr_i`, `wdata_i`, `busy` y `done` de la FSM.
 - **Salidas:** `rdata_o`, pulsos `start`/`clear`/`home` (W1P), y los registros `rs` y `data_byte` guardados.
-- **Explicación:** solo se usan las direcciones `00` y `01`. Los bits W1P se implementan con un flip-flop que se pone en 1 el mismo ciclo en que se escribe, y se limpia automáticamente al ciclo siguiente (o cuando la FSM lo consume).
+Solo se usan las direcciones `00` y `01`. Los bits W1P se implementan con un flip-flop que se pone en 1 el mismo ciclo en que se escribe, y se limpia automáticamente al ciclo siguiente (o cuando la FSM lo consume).
 
-### FSM de Control (detallada)
+### FSM de Control
 
 - **Objetivo:** ejecutar paso a paso tanto el arranque como cada operación individual del LCD.
 - **Entradas:** pulsos de comando, `rs`, `data_byte`, aviso de tiempo cumplido.
@@ -101,7 +101,7 @@ Al terminar `ENTRY_MODE`, el LCD ya quedó completamente configurado y listo par
 
 **IDLE — el estado de reposo**
 
-Aquí es donde la FSM se queda esperando. No hace nada hasta que el resto del sistema (la lógica del juego) le manda una orden escribiendo el bit `start` en el registro de control. Todo el tiempo que la FSM está aquí, el bit `busy` está en 0 — el sistema sabe que puede mandar una nueva operación.
+Aquí es donde la FSM se queda esperando. No hace nada hasta que el resto del sistema le manda una orden escribiendo el bit `start` en el registro de control. Todo el tiempo que la FSM está aquí, el bit `busy` está en 0 — el sistema sabe que puede mandar una nueva operación.
 
 **Bloque 2: escribir un carácter o comando (se repite cada vez que hay algo nuevo que mostrar)**
 
@@ -138,7 +138,7 @@ Se encuentra bajo trabajo para la implementación final de los sistemas.
 - **Objetivo:** dar los distintos tiempos de espera usando un solo contador.
 - **Entradas:** orden de carga y selección del valor.
 - **Salidas:** aviso de tiempo cumplido.
-- **Explicación:** con reloj de 100 MHz (ciclos de 10 ns), un contador de 23 bits alcanza para el valor más grande que se necesita (50 ms). Los valores que puede cargar son:
+Con reloj de 100 MHz (ciclos de 10 ns), un contador de 23 bits alcanza para el valor más grande que se necesita (50 ms). Los valores que puede cargar son:
 
 | Selección | Tiempo | Ciclos de reloj |
 |---|---|---|
@@ -151,7 +151,7 @@ Se encuentra bajo trabajo para la implementación final de los sistemas.
 
 Al encender, la FSM le pide al Temporizador cargar 50 ms y espera. Cuando el Temporizador avisa que el tiempo se cumplió, la FSM manda las instrucciones de arranque una por una, esperando el tiempo correcto después de cada una. Al terminar, pasa a `IDLE` y baja `busy`.
 
-Cuando el sistema del juego quiere escribir algo, escribe el dato y después el comando `start`. La FSM sube `busy`, arma la señal en `lcd_data`, sube `rs` si corresponde, hace el pulso de `E` (200 ns de margen antes, 1 µs en alto, 1 µs en bajo — el dato se captura en el flanco de bajada), espera el tiempo posterior, y finalmente sube `done` y vuelve a `IDLE`.
+Cuando el sistema del juego quiere escribir algo, escribe el dato y después el comando `start`. La FSM sube `busy`, arma la señal en `lcd_data`, sube `rs` si corresponde, hace el pulso de `E`, espera el tiempo posterior, y finalmente sube `done` y vuelve a `IDLE`.
 
 ---
 
