@@ -33,7 +33,6 @@ El sistema principal no toca los pines del LCD directamente. En vez de eso, escr
 
 ---
 
-## Diagrama de segundo nivel
 
 ### Bloques generales
 
