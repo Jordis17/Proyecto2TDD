@@ -100,3 +100,12 @@ Ejemplos:
 
 `END,LOSE,ATTEMPTS\n`
 
+### Resumen del protocolo UART
+
+| Dirección | Mensaje | Formato | Descripción |
+|---|---|---|---|
+| PC → FPGA | Letra | `<letra>` | Un byte ASCII entre `A` y `Z`. |
+| FPGA → PC | `START` | `START,<modo>,<longitud>\n` | Indica el inicio de una nueva partida. |
+| FPGA → PC | `GUESS` | `GUESS,<letra>,<resultado>,<patron>,<intentos>\n` | Informa el resultado de una letra y el estado actualizado. |
+| FPGA → PC | `END` | `END,<resultado>,<causa>\n` | Informa el resultado final de la partida. |
+
