@@ -1,7 +1,5 @@
 // =====================================================================
-// tb_lcd_peripheral.sv - Testbench autoverificable
-//
-// Cubre, sobre el mapa de registros documentado en el propio archivo:
+//    Cubre, sobre el mapa de registros documentado en el propio archivo:
 //   - Escritura/lectura de DATOS.
 //   - Aceptacion de start con busy_i en bajo: pulso de start_o de un
 //     ciclo, rs_o/data_o "comprometidos" (crs_q/cmd_q).

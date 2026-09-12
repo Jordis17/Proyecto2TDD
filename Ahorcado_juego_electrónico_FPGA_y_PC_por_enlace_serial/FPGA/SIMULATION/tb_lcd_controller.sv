@@ -1,6 +1,4 @@
 // =====================================================================
-// tb_lcd_controller.sv - Testbench autoverificable
-//
 // Se instancia el DUT con parametros de tiempo reducidos (pero distintos
 // entre si) para poder simular en segundos y aun asi distinguir espera
 // "corta" de espera "larga". Se usa dut.st_q solo para saber CUANDO
