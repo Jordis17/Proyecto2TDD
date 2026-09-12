@@ -55,9 +55,7 @@ module display_controller #(
 
     // El residuo de dividir entre 10 siempre esta entre 0 y 9, por lo
     // que cuatro bits son suficientes para guardarlo.
-    /* verilator lint_off WIDTHTRUNC */
     assign residuo = time_s_i % 7'd10;
-    /* verilator lint_on WIDTHTRUNC */
 
     // Normalmente el tiempo esta entre 0 y 60. Si por alguna razon
     // llega un valor que necesita mas de dos digitos, se manda un valor
