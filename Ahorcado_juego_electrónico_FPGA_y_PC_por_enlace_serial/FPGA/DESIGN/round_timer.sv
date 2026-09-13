@@ -46,7 +46,7 @@ module round_timer #(
             ms_q   <= '0;
             secs_q <= seconds_i;
         end else if (run_i && tick_i) begin //comprobamos que el temporizador este habilitado y que haya un pulso de tick_i para descontar un milisegundo. 
-            if (ms_q == W'(TICKS_POR_SEGUNDO)) begin
+            if (ms_q == W'(TICKS_POR_SEGUNDO - 1)) begin
                 ms_q <= '0;
                 if (secs_q != 7'd0) secs_q <= secs_q - 1'b1; //si la cuenta de segundos no esta en cero, descontamos un segundo.
             end else begin
