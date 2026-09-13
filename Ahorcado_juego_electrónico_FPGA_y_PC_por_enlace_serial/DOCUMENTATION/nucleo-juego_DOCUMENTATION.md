@@ -28,6 +28,10 @@ La versión final del subsistema está formada por cuatro módulos principales:
 
 ## 4.1 `lfsr`
 
+
+## Diagrama 
+
+
 ### Objetivo
 
 Producir una secuencia pseudoaleatoria de ocho bits que sirva para seleccionar la
@@ -116,11 +120,9 @@ descartan en `game_controller`, no aquí.
 
 El testbench comprueba las dos propiedades que definen un LFSR de ciclo máximo:
 
-| Propiedad | Cómo se comprueba |
-|---|---|
-| Los 255 estados son distintos | se recorre la secuencia completa marcando cada valor visto y se verifica que ninguno se repita antes del ciclo 255 |
-| El cero nunca aparece | se comprueba en cada ciclo del recorrido |
-| La secuencia es reproducible | tras un reinicio, la secuencia vuelve a ser la misma |
+ 1. Los 255 estados son distintos 
+ 2. El cero nunca aparece 
+ 3. La secuencia es reproducible 
 
 ### Recursos
 
@@ -135,6 +137,208 @@ El testbench comprueba las dos propiedades que definen un LFSR de ciclo máximo:
 
 ## 4.2 `word_rom`
 
+## Diagrama
+
+
+### Objetivo
+
+Almacenar el banco de palabras del juego y entregar, para un índice dado, la palabra
+completa en código ASCII junto con la cantidad de letras que tiene.
+
+
+### Entradas
+El módulo es puramente combinacional , no recibe señal de reloj.
+
+| Señal | Ancho | Descripción |
+|---|---|---|
+| `index_i` | 6 bits | Selecciona una de las 64 palabras del banco. |
+
+### Salidas
+
+| Señal | Ancho | Descripción |
+|---|---|---|
+| `word_data_o` | 96 bits | Palabra en ASCII mayúscula, rellenada con espacios hasta los 12 caracteres. |
+| `word_len_o` | 4 bits | Cantidad real de letras, de 4 a 11. |
+
+El ancho de la palabra sale de la longitud máxima:
+
+```
+8 bits por caracter x 12 caracteres = 96 bits
+```
+
+Empaquetado de los caracteres. El carácter de la posición *i*, contando desde cero
+para el primero de la palabra, ocupa:
+
+```
+word_data_o[8*(MAX_LEN-1-i) +: 8]
+```
+
+o sea que el primer carácter queda en los bits más significativos:
+
+```
+ bits   95..88  87..80  79..72   ...   7..0
+        car 0   car 1   car 2    ...   car 11
+```
+
+
+
+
+### Relación con otros módulos
+
+`word_rom` se instancia una única vez en `top`, con el nombre de instancia `banco`.
+
+Su único interlocutor es `game_controller`, que le coloca el índice en el estado de
+carga de la partida y registra de inmediato las dos salidas. De ahí en adelante la
+palabra que se juega proviene de ese registro y no de la ROM, así que el índice puede
+cambiar sin afectar la partida en curso.
+
+
+
+
+### Explicación de funcionamiento
+
+El módulo implementa una función combinacional pura: para cada valor de `index_i`
+existe un par de salidas fijo, sin memoria ni dependencia del historial de entradas.
+El resultado aparece tras el retardo de propagación de la lógica, sin esperar ningún
+flanco de reloj.
+
+El banco está ordenado por dificultad, y de ese orden depende la selección de la
+palabra:
+
+| Índices | Longitud de las palabras | Modos en que pueden salir |
+|---|---|---|
+| 0 a 31 | 6 a 11 letras | Fácil y Difícil |
+| 32 a 63 | 4 o 5 letras | solo Fácil |
+
+Las posiciones que sobran en una palabra corta se rellenan con el código del espacio,
+ así las salidas siempre tienen el mismo ancho y quien la consume usa
+`word_len_o` para saber hasta dónde leer.
+
+
+### Diseño
+
+El modo difícil solo puede usar palabras de seis letras o más. Ese requisito se
+resuelve de la siguiente manera:
+
+| Estrategia | Cómo se garantiza | Costo |
+|---|---|---|
+| Ordenar la tabla por dificultad | el índice se trunca a cinco bits y no puede pasar de 31 | una conexión a tierra en el bit 5 |
+
+Con la tabla ordenada, el modo difícil queda garantizado por
+construcción: el índice fuera de rango simplemente no se puede formar, así que no
+existe ninguna comprobación de longitud en ninguna máquina de estados.
+
+Ahora el orden de la tabla pasa a ser un requisito
+estructural y no una convención cosmética.
+
+### Verificación
+El testbench comprueba las propiedades de las que depende la seleccion de palabra
+
+1. Toda longitud esta entre 4 y 12
+2. Los indices 0..31 tienen longitud >= 6   (modo dificil)
+3. Los indices 32..63 tienen longitud 4 o 5 (solo modo facil)
+4. Las posiciones validas contienen solo A-Z (sin minusculas ni acentos ni caracteres especiales)
+5. Las posiciones de relleno contienen espacio
+
+
+### Recursos
+
+| Recurso | Cantidad |
+|---|---|
+| Registros | 0 |
+| Bloques de memoria dedicados | 0 |
+| Almacenamiento | 6 400 bits en lógica distribuida |
+| Entradas de la función | 6 |
+
+
+---
+
+
 ## 4.3 `round_timer`
 
+### Objetivo
+
+
+
+
+### Entradas
+
+
+### Salidas
+
+
+
+
+
+### Relación con otros módulos
+
+
+
+
+
+### Explicación de funcionamiento
+
+
+
+
+### Diseño
+
+
+
+### Dimensionamiento del registro
+
+
+
+### Verificación
+
+
+### Recursos
+
+
+
+---
+
 ## 4.4 `game_controller`
+
+
+### Objetivo
+
+
+
+
+### Entradas
+
+
+### Salidas
+
+
+
+
+
+### Relación con otros módulos
+
+
+
+
+
+### Explicación de funcionamiento
+
+
+
+
+### Diseño
+
+
+
+### Dimensionamiento del registro
+
+
+
+### Verificación
+
+
+### Recursos
+
+
+
+---
