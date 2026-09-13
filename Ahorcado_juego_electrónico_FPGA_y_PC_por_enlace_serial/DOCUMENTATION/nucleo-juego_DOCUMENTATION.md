@@ -6,11 +6,12 @@
 
 
 La versión final del subsistema está formada por cuatro módulos principales:
-
-* `game_controller`
 * `lfsr`
-* `round_timer`
 * `word_rom`
+* `round_timer`
+* `game_controller`
+
+
 
 
 
@@ -31,6 +32,7 @@ La versión final del subsistema está formada por cuatro módulos principales:
 
 ## Diagrama 
 
+![Diagrama lfsr](./FIGURAS/diagrama_lfsr.png)
 
 ### Objetivo
 
@@ -139,6 +141,7 @@ El testbench comprueba las dos propiedades que definen un LFSR de ciclo máximo:
 
 ## Diagrama
 
+![Diagrama lfsr](./FIGURAS/word_rom.png)
 
 ### Objetivo
 
