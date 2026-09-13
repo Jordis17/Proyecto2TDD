@@ -8,17 +8,22 @@
 // Lectura combinacional; el sistema guarda la palabra en un registro cuando la partida esta en estado de START_GAME.
 // =====================================================================
 
-module word_rom 
-(
-    input  logic [64-1:0] index_i,
-    output logic [96-1:0]  word_data_o,
-    output logic [3:0]  word_len_o   //longitud de la palabra en caracteres (4 bits son suficientes para representar 0..12)
-);
+module word_rom #(
+
     /* Empaquetado de la palabra:
        Cada entrada de la ROM entrega la palabra completa con longitud variable en el vector binario de salida word_data_o.
        Para facilitar lectura de código la primera letra de la palabra se ubica en el bit más significativo, en caso de que la 
        palabra sea más corta que MAX_LEN, los espacios restantes se rellanan con espacios en blanco.
     */
+
+    parameter int N_WORDS = 64,
+    parameter int MAX_LEN = 12
+) (
+    input  logic [$clog2(N_WORDS)-1:0] index_i,
+    output logic [8*MAX_LEN-1:0]    word_data_o,
+    output logic [3:0]              word_len_o   //longitud de la palabra en caracteres (4 bits son suficientes para representar 0..12)
+);
+
     always_comb begin
         unique case (index_i)
 
