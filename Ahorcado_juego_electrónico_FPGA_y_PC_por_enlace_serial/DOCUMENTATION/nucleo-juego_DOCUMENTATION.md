@@ -259,45 +259,147 @@ El testbench comprueba las propiedades de las que depende la seleccion de palabr
 
 ## 4.3 `round_timer`
 
+## Diagrama
+
+![Diagrama round_timer](./FIGURAS/round_timer.png)
+
 ### Objetivo
 
-
+Llevar la cuenta regresiva del tiempo de la partida, entregar en todo momento los
+segundos que quedan, y mantener un aviso de vencimiento que el control del juego pueda
+atender cuando esté en condiciones de hacerlo.
 
 
 ### Entradas
 
+| Señal | Ancho | Descripción |
+|---|---|---|
+| `clk_i` | 1 bit | Reloj del sistema, 100 MHz. |
+| `rst_i` | 1 bit | Reinicio síncrono, activo en alto. Deja la cuenta en cero. |
+| `tick_i` | 1 bit | Habilitación periódica de 1 ms generada por `clk_tick_gen`. El acumulador solo avanza cuando esta señal está activa. |
+| `load_i` | 1 bit | Pulso que carga un nuevo intervalo y limpia el acumulador de milisegundos. |
+| `seconds_i` | 7 bits | Duración del intervalo a medir, en segundos. |
+| `run_i` | 1 bit | Habilita la cuenta descendente. Mientras está en bajo, la cuenta se detiene sin perder su valor. |
+
 
 ### Salidas
 
-
-
+| Señal | Ancho | Descripción |
+|---|---|---|
+| `time_s_o` | 7 bits | Segundos restantes. Válido en todo momento, también con la cuenta detenida. |
+| `timeout_o` | 1 bit | Nivel activo mientras la cuenta esté en cero y el temporizador habilitado. |
 
 
 ### Relación con otros módulos
 
+`round_timer` se instancia una única vez en `top`, con el nombre de instancia
+`temporizador`.
 
+Recibe su base temporal de `clk_tick_gen`, que le entrega un pulso cada milisegundo.
+Sin esa señal el acumulador no avanza, aunque el reloj siga corriendo.
+
+Todo su control proviene de `game_controller`, que decide cuándo cargar, con qué valor y
+cuándo habilitar la cuenta. La señal `timeout_o` regresa a esa misma máquina de estados
+como condición de transición.
+
+La salida `time_s_o` tiene dos destinos:
+
+| Destino | Para qué la usa |
+|---|---|
+| `game_controller` | forma parte del estado de la partida |
+| `display_controller` | la muestra en dos dígitos de los displays de siete segmentos |
+
+Los intervalos que atiende:
+
+| Situación | Valor cargado | Efecto del vencimiento |
+|---|---|---|
+| Partida en modo Fácil | `SEG_FACIL`, 60 s | derrota por tiempo |
+| Partida en modo Difícil | `SEG_DIFICIL`, 45 s | derrota por tiempo |
 
 
 
 ### Explicación de funcionamiento
 
+El módulo son dos contadores encadenados sobre la misma habilitación de milisegundo.
 
+El primero acumula pulsos de `tick_i` y, al completar mil, ordena descontar un segundo y
+vuelve a cero. El segundo lleva los segundos restantes y baja de uno en uno hasta cero,
+donde se detiene.
+
+**Carga.** Cuando `game_controller` necesita medir un intervalo, coloca la duración en
+`seconds_i` y activa `load_i` durante un ciclo. El contador de segundos toma ese valor y
+el acumulador de milisegundos se pone a cero.
+
+**Prioridad de la carga.** La carga se evalúa antes que la cuenta. Si en un mismo ciclo
+coincidieran una orden de carga y un pulso de milisegundo, el contador toma el valor
+nuevo completo en lugar de restarle una unidad de entrada.
+
+**Detención en cero.** La condición de descuento incluye la comprobación de que el
+contador de segundos no esté ya en cero. Sin ella, la resta produciría un
+desbordamiento y el registro pasaría a su valor máximo, iniciando una cuenta de 127
+segundos que nadie pidió.
 
 
 ### Diseño
+
+Se utiliza una única señal de habilitación en lugar de generar relojes derivados, evitando problemas de distribución 
+y temporización. Las señales load_i y run_i se mantienen separadas para permitir cargar el 
+tiempo inicial y detener posteriormente la cuenta sin perder el valor mostrado durante 
+la pantalla de resultados. Al cargar un nuevo tiempo, el acumulador de milisegundos se reinicia 
+para garantizar que el primer segundo tenga una duración completa. Finalmente, timeout_o se implementa 
+como un nivel que permanece activo mientras el tiempo sea cero y el temporizador esté habilitado, evitando que el vencimiento 
+se pierda mientras el controlador se encuentra ocupado con el LCD o la comunicación serial. 
+Así, el módulo mantiene una temporización sencilla, eficiente y robusta, adaptada a las necesidades del sistema.
+
+| Condición | `ms_q` siguiente | `secs_q` siguiente | `timeout_o` |
+|---|---|---|---|
+| `rst_i` activo | 0 | 0 | 0 |
+| `load_i` activo | 0 | `seconds_i` | 0 |
+| `run_i`, `tick_i`, `ms_q` < 999 | `ms_q` + 1 | `secs_q` | 0 |
+| `run_i`, `tick_i`, `ms_q` = 999, `secs_q` > 0 | 0 | `secs_q` − 1 | 0 |
+| `run_i`, `tick_i`, `ms_q` = 999, `secs_q` = 0 | 0 | 0 | **1** |
+| `run_i` inactivo | `ms_q` | `secs_q` | 0 |
 
 
 
 ### Dimensionamiento del registro
 
+El acumulador de milisegundos debe llegar hasta 999:
 
+```
+ceil(log2(1000)) = 10 bits        2^10 = 1024 >= 1000
+```
+
+El ancho se calcula en el código a partir del parámetro, con `$clog2`, de modo que si el
+periodo del tick cambiara el registro se redimensiona solo.
+
+
+El contador de segundos es de siete bits, lo que representa hasta 127. El valor más
+grande que llega a cargarse es 60, correspondiente al modo fácil, de modo que existe
+margen. Con seis bits, que llegan a 63, también alcanzaría, pero el margen sería de solo
+tres unidades y cualquier cambio de los tiempos de juego obligaría a revisar el ancho.
 
 ### Verificación
+
+| Caso | Qué comprueba |
+|---|---|
+| Carga y cuenta completa | que el intervalo medido sea el solicitado |
+| Detención con `run_i` en bajo | que el valor se conserve y la cuenta no avance |
+| Recarga a mitad de una cuenta | que el valor nuevo reemplace el anterior por completo |
+| Llegada a cero | que la cuenta se detenga y no dé la vuelta |
+| Nivel de vencimiento | que se mantenga activo mientras el temporizador esté habilitado |
+| Vencimiento con el temporizador detenido | que no se active |
 
 
 ### Recursos
 
-
+| Recurso | Cantidad |
+|---|---|
+| Registros | 17 (10 del acumulador y 7 del contador de segundos) |
+| Incrementadores | 1 de 10 bits |
+| Decrementadores | 1 de 7 bits |
+| Comparadores de igualdad | 2 contra constantes |
+| Multiplexores de carga | 2 |
 
 ---
 
