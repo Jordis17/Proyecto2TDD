@@ -1,109 +1,84 @@
-# Defensa Escrita — Generador del Banco de Palabras (`gen_word_rom.py`)
+# Cómo funciona `gen_word_rom.py`
 
-**Proyecto:** EL3313 — Taller de Diseño Digital, Proyecto 2 (Ahorcado FPGA/PC)
-**Componente:** Herramienta de escritorio (offline) que genera hardware a partir de datos
+## Qué es y para qué sirve
 
-> **Nota sobre las fuentes de este documento:** este análisis se hizo a partir de `README_gen_word_rom.md` y del diagrama de flujo `gen_word_rom_flujo.png`. No se tuvo acceso al archivo `gen_word_rom.py` en sí, así que las referencias son a funciones y comportamiento descritos en la documentación, no a números de línea. Si se sube el `.py`, este documento se puede ajustar para citar líneas exactas, igual que se hizo con la terminal.
+Este script no corre en la FPGA ni durante la partida. Es una herramienta que se corre en la computadora, una sola vez (o cada vez que se cambia el banco de palabras), y lo que hace es tomar una lista de palabras escrita en Python y convertirla en `word_rom.sv`, el módulo de SystemVerilog que la FPGA sí usa mientras el juego está corriendo.
 
----
+La idea de fondo es simple: escribir 64 palabras a mano dentro de un `case` de SystemVerilog, con el texto empacado en bits, sería tedioso y muy fácil de equivocar. Entonces el banco se escribe donde es cómodo editarlo (una lista de Python) y este script se encarga de revisar que esté bien armado y de generar el archivo `.sv` a partir de eso.
 
-## 1. Rol dentro del sistema completo
+## Por qué el orden de la lista no es solo estético
 
-Este script **no corre en la FPGA ni durante la partida**: es una herramienta de desarrollo que se ejecuta en la PC, una vez (o cada vez que se edita el banco de palabras), para producir `word_rom.sv` — el módulo de SystemVerilog que el hardware sí usa en tiempo real. Es el mismo patrón que ya se justificó para la terminal del jugador: mantener en Python (fácil de leer, editar y validar) todo lo que no necesita correr en hardware, y generar automáticamente solo el artefacto final que sí lo necesita.
+Esta es la parte más importante de entender antes de leer el resto del código. El banco tiene exactamente 64 palabras, y se dividen en dos mitades **por posición**, no porque tengan una etiqueta aparte que diga "esta es difícil" o "esta es fácil":
 
-Vale la pena decirlo explícito en la defensa: **`gen_word_rom.py` es una herramienta de generación de hardware (un "code generator"), no parte del sistema en ejecución.** Si el jurado pregunta "¿esto corre en la tarjeta?", la respuesta es no — genera un archivo `.sv` que después se sintetiza junto con el resto del proyecto.
+- Índices 0 a 31: palabras de 6 letras o más. Sirven para el modo DIFICIL y también para FACIL.
+- Índices 32 a 63: palabras de 4 o 5 letras. Solo sirven para FACIL.
 
----
-
-## 2. El contrato entre el banco de palabras y el hardware
-
-Este es el punto más importante para defender, porque es el que menos obvio resulta a primera vista: **el orden de la lista de palabras en Python no es cosmético, es parte del contrato con el hardware.**
-
-- El banco tiene exactamente **64 palabras** (`N_WORDS`), divididas por posición, no por ningún campo separado:
-  - Índices **0–31**: palabras de 6+ letras (`N_HARD` = 32, `HARD_MIN_LEN` = 6). Sirven para Difícil y para Fácil.
-  - Índices **32–63**: palabras de 4–5 letras. Solo sirven para Fácil.
-- La FPGA elige la palabra **truncando directamente los bits del LFSR**, sin módulo ni descarte de valores:
+¿Por qué importa el orden? Porque en la FPGA, la palabra se escoge truncando directamente los bits del LFSR, sin módulo, sin descartar valores y sin ningún bucle de reintento:
 
 ```
 DIFICIL: rom_index = lfsr[4:0]   -> 0..31
 FACIL:   rom_index = lfsr[5:0]   -> 0..63
 ```
 
-Esto significa que si una palabra corta se colara entre los índices 0–31, el modo Difícil podría sortear (por construcción del hardware, no por un bug de lógica) una palabra que no cumple su propio mínimo de longitud. Por eso `validate()` no solo revisa que las palabras sean válidas individualmente, sino que cada una **esté del lado correcto de la frontera** según su longitud — es una regla de integridad estructural del banco, no un detalle estético.
+En otras palabras, el índice que sale del LFSR ya es, tal cual, la dirección del banco. Eso es baratísimo en hardware (truncar bits no cuesta nada), pero la contrapartida es que si a alguien se le ocurre meter una palabra corta en medio de los índices 0-31, el modo DIFICIL podría terminar sorteando una palabra que no cumple su propio mínimo de 6 letras, sin que nadie se dé cuenta hasta que ya está jugando. Por eso el script no solo revisa que cada palabra esté bien escrita: también revisa que esté del lado correcto de esa frontera.
 
-**Por qué truncar el LFSR en vez de usar módulo o rechazo de valores:** truncar bits es gratis en hardware (no requiere un divisor ni lógica de reintento); usar módulo o descartar valores fuera de rango sí cuesta lógica y ciclos. La contrapartida de esa simplicidad es que el banco *tiene* que tener exactamente 32 y 32 palabras, ordenadas así — de ahí que el script valide el conteo exacto antes de generar nada.
+## Recorriendo el código
 
----
+### Las constantes de arriba
 
-## 3. Las piezas del programa
+```python
+MAX_LEN = 12
+N_WORDS = 64
+N_HARD = 32
+HARD_MIN_LEN = 6
+```
 
-| Pieza | Qué es | Para qué sirve |
-|---|---|---|
-| `MAX_LEN`, `N_WORDS`, `N_HARD`, `HARD_MIN_LEN` | Constantes de contrato | Fijan los números que el módulo `word_rom` en SystemVerilog espera; si cambian aquí, hay que revisar también el hardware |
-| `HARD_WORDS`, `EASY_WORDS` | Listas de texto en Python | Las 32 palabras largas y las 32 cortas, editables a mano |
-| `WORDS` | `HARD_WORDS + EASY_WORDS` | El banco completo, ya en el orden que el hardware usa como índice |
-| `validate(WORDS)` | Validador | Revisa cantidad exacta, sin repetidas, alfabeto A-Z, largo máximo, y frontera Difícil/Fácil — acumula **todos** los errores antes de reportar |
-| `emit_sv(WORDS)` | Generador | Arma el texto completo del módulo `word_rom.sv`: encabezado, declaración, `case` con una entrada por palabra más un valor por omisión |
-| `main()` | Orquestador | Llama a `validate()`, decide si continuar o abortar, imprime el resumen, respeta `--check`, y si corresponde llama a `emit_sv()` y escribe el archivo |
+Estas cuatro constantes establecen las restricciones que debe cumplir el banco de palabras para ser compatible con el hardware. `MAX_LEN` define cuántos bits mide `word_data_o` en el módulo generado (8 bits por carácter, hasta 12 caracteres). `N_WORDS`, `N_HARD` y `HARD_MIN_LEN` son justo los números que le permiten al RTL usar el LFSR truncado como índice sin tener que validar nada mientras el juego corre. Si cualquiera de estas cuatro cambia, hay que ir a revisar también el módulo de SystemVerilog que consume el ROM, porque ahí también se usan esos mismos números como parámetros.
 
----
+### `HARD_WORDS`, `EASY_WORDS` y `WORDS`
 
-## 4. Recorrido del diagrama de flujo
+`HARD_WORDS` son las 32 palabras largas y `EASY_WORDS` las 32 cortas. `WORDS = HARD_WORDS + EASY_WORDS` consiste simplemente en concatenar las dos listas, porque ese orden es justo el que después se convierte en índice del ROM. Las dos listas contienen 32 palabras cada una. `HARD_WORDS` trae 32 palabras (todas entre 6 y 11 letras, dentro del límite de `MAX_LEN`) y `EASY_WORDS` trae otras 32 (todas de 4 o 5 letras). Esto coincide con los valores definidos por las constantes.
 
-![Diagrama de flujo del generador de banco de palabras](FIGURAS/gen_word_rom_flujo.png)
+### `validate(words)`
 
-El diagrama sigue exactamente la lógica de `main()` descrita en el README:
+Esta función no genera nada, solo revisa. Junta una lista de errores en vez de detenerse en el primero que encuentra — esto tiene sentido porque si uno está armando el banco a mano y comete tres o cuatro errores de una vez, es mucho mejor verlos todos juntos que corregir uno, correr el script de nuevo, corregir otro, y así.
 
-1. **`validate(WORDS)`** — se corre siempre, antes de tocar cualquier archivo.
-2. **¿Hay errores?**
-   - **Sí →** se imprime `FAIL` junto con **cada** error encontrado (no solo el primero) y el programa termina con `return 1`. Este código de retorno distinto de cero es importante si el script se llama desde un flujo automatizado (por ejemplo, un `Makefile` o un script de build): permite detectar la falla sin tener que leer la salida de texto.
-   - **No →** se imprime `PASS` junto con estadísticas del banco (cuántas palabras de cada tipo, cuánto ocupa en bits) y se continúa.
-3. **`--check`** (bandera de línea de comandos):
-   - **Sí →** se termina con `return 0` **sin generar nada**. Esto separa "¿el banco es válido?" de "generar el hardware", útil para revisar el banco mientras se edita sin sobrescribir el `.sv` en cada intento.
-   - **No →** se sigue al generador.
-4. **`emit_sv(WORDS)`** — arma el texto completo del módulo.
-5. **Escribir `word_rom.sv`** — se guarda el archivo generado.
-6. **Imprimir la ruta generada** — confirmación en pantalla de dónde quedó el archivo.
-7. **`return 0`** — fin exitoso.
+Lo que revisa, en orden:
 
-**Nota sobre la numeración del diagrama:** los números dentro de las cajas (`3.`, `4.`, `5.`) se repiten entre la rama de error y la rama de éxito porque cuentan el paso **dentro de cada rama**, no una numeración global del diagrama completo. Si el jurado pregunta por qué hay dos cajas distintas marcadas "3.", esa es la razón: son el tercer paso de caminos distintos, no el mismo paso duplicado.
+1. Que haya exactamente `N_WORDS` palabras (64). Si hay de más o de menos, ya no cuadra con el ancho del índice del LFSR.
+2. Que no haya palabras repetidas.
+3. Para cada palabra: que sea puro A-Z mayúscula (usa `w.isascii() and w.isalpha() and w.isupper()`, que entre las tres condiciones terminan en conjunto exigen exactamente esas condiciones, sin tildes ni Ñ, porque la FPGA no tiene tabla para esos caracteres y tampoco los podría comparar con lo que llega por UART).
+4. Que la longitud esté entre 4 y `MAX_LEN`.
+5. Que si el índice es menor que `N_HARD` (o sea, está en la mitad de DIFICIL), la palabra tenga al menos `HARD_MIN_LEN` letras.
+6. Que si el índice es mayor o igual a `N_HARD` (la mitad de FACIL), la palabra tenga **menos** de `HARD_MIN_LEN` letras (en la práctica, 4 o 5).
 
----
+Los dos últimos puntos garantizan la separación entre las palabras de ambos modos de juego: el truncamiento del LFSR.
 
-## 5. Decisiones de diseño y su justificación
+### `emit_sv(words)`
 
-- **Separar el banco de palabras del hardware que lo usa:** escribir 64 entradas de un `case` a mano, con el texto empacado en bits, es tedioso y propenso a error. Mantener el banco como una lista de Python legible, y generar el `.sv` automáticamente, mueve el riesgo de error humano a un solo lugar (la lista) en vez de repartirlo por todo el archivo generado.
-- **`validate()` acumula todos los errores en vez de detenerse en el primero:** si el banco tiene, por ejemplo, tres palabras repetidas y dos con tilde, es más eficiente corregir las cinco de una vez que descubrirlas una por una en corridas sucesivas del script.
-- **Validar la frontera Difícil/Fácil según la posición, no solo el contenido:** como se explicó en la sección 2, esta es la regla que protege la suposición de hardware de que "truncar el LFSR = índice válido". Sin esta validación, un banco "válido" en apariencia (64 palabras, sin repetidas, alfabeto correcto) podría seguir rompiendo la garantía de longitud mínima del modo Difícil.
-- **La bandera `--check`:** separa la pregunta "¿es válido el banco?" de la acción "generar el archivo". Esto evita sobrescribir `word_rom.sv` cada vez que se está iterando sobre el banco de palabras, y es el tipo de opción típica de una herramienta de build (equivalente a un "dry run").
-- **Rellenar cada palabra con espacios hasta `MAX_LEN` y guardar el largo real aparte:** el bus de datos en el hardware tiene un ancho fijo (determinado por la palabra más larga permitida), así que todas las entradas del `case` deben tener el mismo ancho de bits aunque las palabras tengan distinta longitud real; guardar el largo real por separado es lo que le permite al resto del circuito saber dónde termina la palabra dentro del campo de ancho fijo.
-- **Mismo alfabeto (A-Z, sin tildes ni Ñ) que valida `ahorcado_terminal.py` del lado PC:** esto no es casualidad — es el mismo alfabeto que la FPGA entiende en todo el sistema. La terminal descarta en la entrada del jugador lo que el banco de palabras nunca podría contener, y viceversa: si el banco tuviera una palabra fuera de ese alfabeto, ninguna letra que el jugador pudiera enviar coincidiría nunca con ese carácter. Vale la pena mencionar esta coherencia entre los dos scripts si el jurado pregunta cómo se garantiza que "todo hable el mismo idioma" en el proyecto.
-- **Código de retorno distinto según el resultado (`return 1` en falla, `return 0` en éxito o en `--check`):** permite integrar el script en un flujo de compilación automatizado que necesite saber si generar el hardware fue exitoso, sin depender de parsear la salida de texto.
+- Arma todo como una lista de líneas de texto (`lines.append`) y al final las junta con saltos de línea. Es más fácil de leer y de depurar que ir concatenando un string gigante.
+- El encabezado del archivo generado avisa explícitamente "ARCHIVO GENERADO AUTOMATICAMENTE. No editar a mano." — un detalle chiquito pero importante para que nadie edite el `.sv` directamente y pierda el cambio la próxima vez que se regenere.
+- Explica en un comentario cómo queda empacada cada palabra dentro de `word_data_o`: el primer carácter de la palabra queda en los bits más significativos. Esto es porque al escribir un string de Python como literal de texto en SystemVerilog (`"PUERTA      "`), el primer carácter queda naturalmente en la parte alta del vector.
+- Cada palabra se rellena con espacios hasta `MAX_LEN` usando `w.ljust(MAX_LEN)`, porque el ancho de `word_data_o` en hardware es fijo — todas las entradas del `case` tienen que ocupar el mismo tamaño, sin importar si la palabra real mide 4 letras o 11. Por separado se guarda `word_len_o` con el largo real, para que el resto del para que el resto del circuito conozca la longitud real de la palabra.
+- El formato `6'd{i:<2}` y `4'd{len(w):<2}` con el `<2` no cambia el valor, solo lo alinea visualmente con espacios para que el archivo generado se vea ordenado si alguien lo abre a revisar — únicamente mejora la legibilidad del archivo generado.
+- Al final agrega un `default` para cuando `index_i` caiga fuera de las 64 entradas válidas. En teoría esto no debería pasar nunca en operación normal, el `case` debe definir un comportamiento para cualquier valor posible de index_i. Algo definido para cualquier valor posible, así que se entrega una palabra vacía en vez de dejar la salida sin definir (lo cual generaría un latch o un valor `X` en simulación).
 
----
+### `main()`
 
-## 6. Preguntas esperadas del jurado y respuestas sugeridas
+Es la parte que decide qué hacer con las dos funciones de arriba:
 
-**¿Por qué no escribir `word_rom.sv` directamente a mano?**
-Porque el banco tiene una regla estructural (el orden define el rango del LFSR) que es fácil de romper por accidente al editar un `case` de 64 entradas a mano; automatizar la generación mueve esa validación a un solo lugar, ejecutado cada vez.
+1. Llama a `validate(WORDS)`.
+2. Si hay errores, imprime `FAIL` con cada uno de ellos y termina devolviendo `1` — no llega a tocar ningún archivo.
+3. Si no hay errores, imprime `PASS` junto con un resumen: cuántas palabras hay en total, cuántas son válidas para DIFICIL (con su rango de longitudes), cuántas son solo de FACIL, la longitud máxima encontrada, y cuánto ocupa el banco completo en bits.
+4. Si se corrió con `--check`, se detiene ahí y devuelve `0` sin generar nada — sirve para revisar que el banco esté bien mientras se está editando, sin necesidad de regenerar el `.sv` cada vez.
+5. Si no se pidió `--check`, llama a `emit_sv(WORDS)`, escribe el resultado en la ruta calculada a partir de la ubicación del propio script, e imprime esa ruta como confirmación.
 
-**¿Qué pasa si agrego una palabra de 5 letras en el rango 0–31 por error?**
-`validate()` lo detecta como un error de frontera Difícil/Fácil y el script termina con `FAIL` sin generar nada — nunca se produce un `word_rom.sv` a partir de un banco inválido.
+## Cómo se ve esto en el diagrama de flujo
 
-**¿Por qué el hardware no valida el banco también?**
-Porque el banco se fija en tiempo de síntesis, no en tiempo de ejecución: la validación tiene que pasar *antes* de generar el hardware, no durante el juego. Validar en tiempo de ejecución en la FPGA sería gastar lógica en comprobar algo que ya se garantizó en el flujo de generación.
+![Diagrama de flujo de gen_word_rom.py](FIGURAS/gen_word_rom_flujo.png)
 
-**¿Qué significa `--check` exactamente?**
-Ejecuta la misma validación completa, pero se detiene ahí: no llama a `emit_sv()` ni escribe ningún archivo. Sirve para revisar el banco mientras se edita, sin regenerar el hardware en cada intento.
+El diagrama sigue exactamente esta lógica de `main()`. Un detalle importante es que los números dentro de las cajas (3., 4., 5.) se repiten porque cada rama del diagrama tiene su propia numeración interna, se repiten entre la rama de "hay errores" y la rama de "no hay errores" porque cada rama cuenta sus propios pasos por separado, no es una numeración corrida de todo el diagrama. No es un error, solo hay que tenerlo claro para no confundirse pensando que hay dos pasos "3" iguales.
 
-**¿Por qué el banco tiene que ser de exactamente 64 palabras y no una cantidad flexible?**
-Porque el índice del LFSR truncado tiene un rango fijo determinado por su ancho de bits (`lfsr[5:0]` da 64 valores posibles); si el banco tuviera menos de 64 palabras, algunos valores del LFSR no tendrían palabra asociada, y si tuviera más, algunas palabras nunca podrían salir sorteadas.
+## En resumen
 
----
-
-## 7. Conclusión
-
-`gen_word_rom.py` traslada al mundo de Python (donde es barato validar y fácil de leer) una responsabilidad que de otro modo viviría, frágil y oculta, dentro de un `case` de SystemVerilog escrito a mano: garantizar que el banco de palabras cumpla exactamente las suposiciones que el hardware hace sobre él para poder sortear una palabra con solo truncar bits. La validación exhaustiva antes de generar cualquier archivo, la bandera `--check` para iterar sin sobrescribir, y la coherencia de alfabeto con el resto del proyecto son las tres piezas que hay que poder justificar si se pregunta por qué el script está construido así y no de otra forma.
-
----
-
+`gen_word_rom.py` hace tres cosas, en este orden: valida que el banco de palabras cumpla exactamente lo que el hardware necesita (cantidad, alfabeto, largo, y sobre todo el orden que hace posible truncar el LFSR sin módulo), imprime un resumen para saber que todo salió bien, y solo si todo está en regla genera el archivo `.sv` final. La bandera `--check` permite hacer solo la primera parte, útil mientras se está editando el banco a mano.
