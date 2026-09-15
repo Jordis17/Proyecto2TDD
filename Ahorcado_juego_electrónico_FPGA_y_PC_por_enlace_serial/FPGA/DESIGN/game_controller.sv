@@ -308,4 +308,125 @@ module game_controller #(
         endcase
     end
 
+
+always_ff @(posedge clk_i) begin
+        if (rst_i) begin
+            st_q     <= S_DIBUJA_SEL;
+            mode_q   <= 1'b0;
+            wins_q   <= 8'h00;
+            rev_q    <= '0;
+            usadas_q <= '0;
+            err_q    <= 3'd0;
+            ms_q     <= '0;
+        end else begin
+            // El generador se captura en el ciclo de la pulsacion. Corre
+            // libre, asi que el instante de la pulsacion es la fuente de
+            // variedad.
+            unique case (st_q)
+
+                S_DIBUJA_SEL: begin
+                    if (!lcd_busy_i) st_q <= S_SELECCION;
+                end
+
+                S_SELECCION: begin
+                    if (btn_sel_i) begin
+                        mode_q <= !mode_q;
+                        st_q   <= S_DIBUJA_SEL;
+                    end else if (btn_ok_i) begin
+                        lfsr_cap_q <= lfsr_i[5:0];
+                        st_q       <= S_CARGA;
+                    end
+                end
+
+                S_CARGA: begin
+                    word_q     <= rom_data_i;
+                    len_q      <= rom_len_i;
+                    rev_q      <= '0;
+                    usadas_q   <= '0;
+                    err_q      <= 3'd0;
+                    hit_q      <= 1'b0;
+                    rpt_q      <= 1'b0;
+                    victoria_q <= 1'b0;
+                    st_q       <= S_INICIO;
+                end
+
+                S_INICIO: st_q <= S_ESPERA_INICIO;
+
+                S_ESPERA_INICIO: if (capas_libres) st_q <= S_JUGANDO;
+
+                S_JUGANDO: begin
+                    // El vencimiento se mira antes que la letra: pasado el
+                    // tiempo ya no se acepta ninguna.
+                    if (timer_timeout_i) begin
+                        fin_q <= FIN_LTO;
+                        st_q  <= S_FIN;
+                    end else if (rx_valid_i) begin
+                        letra_q <= rx_letter_i;
+                        st_q    <= S_EVALUA;
+                    end
+                end
+
+                S_EVALUA: begin
+                    if (usadas_q[idx_letra]) begin
+                        // repetida: no consume intento, no toca errores y
+                        // no se vuelve a evaluar
+                        rpt_q      <= 1'b1;
+                        hit_q      <= 1'b0;
+                        victoria_q <= 1'b0;
+                    end else begin
+                        usadas_q[idx_letra] <= 1'b1;
+                        rev_q               <= rev_next;
+                        err_q               <= err_next;
+                        hit_q               <= acierto;
+                        victoria_q          <= gana;
+                        rpt_q               <= 1'b0;
+                    end
+                    st_q <= S_PUBLICA;
+                end
+
+                S_PUBLICA: st_q <= S_ESPERA_JUGADA;
+
+                S_ESPERA_JUGADA: begin
+                    if (capas_libres) begin
+                        if (victoria_q) begin
+                            fin_q <= FIN_WIN;
+                            st_q  <= S_FIN;
+                        end else if (err_q == MAX_ERR) begin
+                            fin_q <= FIN_LER;
+                            st_q  <= S_FIN;
+                        end else if (timer_timeout_i) begin
+                            fin_q <= FIN_LTO;
+                            st_q  <= S_FIN;
+                        end else begin
+                            st_q <= S_JUGANDO;
+                        end
+                    end
+                end
+
+                S_FIN: begin
+                    if (fin_q == FIN_WIN) wins_q <= wins_next;
+                    st_q <= S_ESPERA_FIN;
+                end
+
+                S_ESPERA_FIN: begin
+                    if (capas_libres) begin
+                        ms_q <= '0;
+                        st_q <= S_RESULTADO;
+                    end
+                end
+
+                S_RESULTADO: begin
+                    // Los tres segundos se cuentan desde que termino el
+                    // dibujo.
+                    if (tick_i) begin
+                        if (ms_q == W_MS'(RESULT_MS - 1)) st_q <= S_DIBUJA_SEL;
+                        else                              ms_q <= ms_q + 1'b1;
+                    end
+                end
+
+                default: st_q <= S_DIBUJA_SEL;
+            endcase
+        end
+    end
+
 endmodule
