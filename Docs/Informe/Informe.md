@@ -458,15 +458,6 @@ Sobre el LFSR: como nunca vale cero, el índice 0 sale un poco menos que los dem
 - **Las frecuencias y tiempos en la tarjeta no se midieron con instrumentos.**
 - **El marcador satura en 99.**
 
-### 13.3 Mejoras posibles
-
-- Agregar una FIFO pequeña en recepción para no depender de la terminal.
-- Medir con osciloscopio `lcd_e_o`, la línea serie y `aud_pwm_o`.
-- Correr la misma regresión en Vivado con el núcleo VHDL y con el modelo, y comparar resultados.
-- Mostrar también el tiempo restante en el LCD, o una barra de intentos.
-- Permitir cargar otro banco de palabras sin regenerar el RTL, por ejemplo con una BRAM inicializada desde archivo.
-- Reducir las copias de la palabra compartiendo un solo snapshot entre las dos capas, si en otro diseño los recursos fueran limitados.
-
 ---
 
 ## 14. Conclusiones
