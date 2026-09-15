@@ -208,4 +208,104 @@ module game_controller #(
                      : (win_uni == 4'd9) ? {win_dec + 4'd1, 4'd0}
                                          : {win_dec, win_uni + 4'd1};
 
+    // ---------------------------------------------------------------
+    // Salidas de control
+    // ---------------------------------------------------------------
+    logic capas_libres;
+
+    assign capas_libres = !lcd_busy_i && !uart_busy_i;
+
+    always_comb begin
+        redraw_o        = 1'b0;
+        uart_send_o     = 1'b0;
+        uart_event_o    = EV_INICIO;
+        snd_start_o     = 1'b0;
+        snd_event_o     = SND_NINGUNO;
+        timer_load_o    = 1'b0;
+        timer_run_o     = 1'b0;
+        timer_seconds_o = 7'd0;
+        screen_o        = SCR_SELECT;
+        state_o         = 2'b00;
+
+
+        //Se genera la logica combinacional de la maquina de estados 
+        unique case (st_q)
+
+            S_DIBUJA_SEL: begin
+                redraw_o = !lcd_busy_i;      // se pide en cuanto haya sitio
+            end
+
+            S_SELECCION: ;
+
+            S_CARGA: begin
+                state_o         = 2'b01;
+                timer_load_o    = 1'b1;
+                timer_seconds_o = mode_q ? 7'(SEG_DIFICIL) : 7'(SEG_FACIL); //segundos según el modo seleccionado
+            end
+
+            S_INICIO: begin // se dispara la trama de inicio y la pantalla de juego
+                state_o      = 2'b01;
+                screen_o     = SCR_PLAY;
+                redraw_o     = 1'b1;
+                uart_send_o  = 1'b1;
+                uart_event_o = EV_INICIO;
+            end
+
+            S_ESPERA_INICIO: begin // espera a que las dos capas queden libres para continuar
+                state_o  = 2'b01;
+                screen_o = SCR_PLAY;
+            end
+
+            S_JUGANDO, S_EVALUA: begin // se inicia la jugada y se actualiza el temporizador
+                state_o     = 2'b01;
+                screen_o    = SCR_PLAY;
+                timer_run_o = 1'b1;
+            end
+
+            S_PUBLICA: begin // se publica el resultado de la jugada, se dispara trama y sonido
+                state_o      = 2'b01;
+                screen_o     = SCR_PLAY;
+                timer_run_o  = 1'b1;
+                uart_send_o  = 1'b1;
+                // Una letra repetida no cambia nada visible: solo se avisa
+                // a la PC. Redibujar seria parpadeo gratis.
+                uart_event_o = rpt_q ? EV_REPETIDA : EV_LETRA;
+                redraw_o     = !rpt_q;
+                snd_start_o  = !rpt_q;
+                snd_event_o  = hit_q ? SND_ACIERTO : SND_ERROR;
+            end
+
+            S_ESPERA_JUGADA: begin // espera a que se complete la jugada
+                state_o     = 2'b01;
+                screen_o    = SCR_PLAY;
+                timer_run_o = 1'b1;
+            end
+
+            S_FIN: begin //indica el fin de la partida, dispara pantalla, trama y sonido
+                state_o      = 2'b10;
+                redraw_o     = 1'b1;
+                uart_send_o  = 1'b1;
+                snd_start_o  = 1'b1;
+                uart_event_o = EV_FIN;
+                snd_event_o  = (fin_q == FIN_WIN) ? SND_VICTORIA : SND_DERROTA;
+                unique case (fin_q)
+                    FIN_WIN: screen_o = SCR_WIN;
+                    FIN_LER: screen_o = SCR_LOSE_FALLOS;
+                    default: screen_o = SCR_LOSE_TIEMPO;
+                endcase
+            end
+
+            S_ESPERA_FIN, S_RESULTADO: begin // espera a que se completen las dos capas y arranca el contador de tres segundos que muestra resultado
+                state_o = 2'b10;
+                unique case (fin_q)
+                    FIN_WIN: screen_o = SCR_WIN;
+                    FIN_LER: screen_o = SCR_LOSE_FALLOS;
+                    default: screen_o = SCR_LOSE_TIEMPO;
+                endcase
+            end
+
+            default: ;
+        endcase
+    end
+
 endmodule
