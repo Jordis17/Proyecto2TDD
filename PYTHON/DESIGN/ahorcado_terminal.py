@@ -1,5 +1,12 @@
-#!/usr/bin/env python3
 """
+ahorcado_terminal.py - Terminal del jugador
+
+La FPGA lleva el juego entero. Esta aplicacion solo hace dos cosas:
+mandar la letra que el jugador escribe y mostrar lo que la FPGA
+responde. No guarda la palabra secreta, no elige palabra, no decide
+quien gana y no lleva el tiempo. Si alguna vez parece que esta terminal
+"sabe" algo del juego, es porque la FPGA se lo acaba de decir.
+
 Protocolo
 ---------
 De la PC a la FPGA va un solo byte, de la A a la Z.
@@ -23,13 +30,16 @@ El limite de tiempo corre en la FPGA. Si el jugador se queda pensando,
 la partida puede terminar mientras la terminal esta esperando que
 escriba algo. Con lectura sincronica ese aviso no se veria hasta que
 escribiera, que es justo cuando ya no sirve. El hilo lector recibe
-siempre, avisa en pantalla si la partida termina durante la espera, y la
-letra que el jugador escriba despues se descarta.
+siempre y, si la partida termina durante la espera, imprime ahi mismo el
+desenlace y la palabra, para que la terminal diga lo mismo que el LCD en
+el momento en que pasa. La letra que el jugador escriba despues se
+descarta.
 
 Uso
 ---
     pip install pyserial
     python ahorcado_terminal.py --port COM4           (Windows)
+    python ahorcado_terminal.py --list                lista los puertos
 """
 
 import argparse
@@ -38,7 +48,7 @@ import sys
 import threading
 
 # pyserial es la libreria que permite hablar con el puerto serie desde
-# Python. 
+# Python.
 try:
     import serial
     from serial.tools import list_ports
@@ -46,7 +56,7 @@ except ImportError:
     sys.exit("Falta pyserial. Instalalo con:  pip install pyserial")
 
 
-# Velocidad del puerto serie (baudios). 
+# Velocidad del puerto serie (baudios).
 BAUDIOS = 115200
 
 # Como traducir el codigo de tres letras que manda la FPGA para el
@@ -64,9 +74,40 @@ DESENLACES = {
     "LTO": "PERDISTE: se acabo el tiempo",
 }
 
-# La FPGA manda el modo como una sola letra; aqui se traduce a
-# un nombre legible.
+# La FPGA manda el modo como una sola letra; aqui se traduce a un
+# nombre legible.
 MODOS = {"F": "Facil", "D": "Dificil"}
+
+
+# Las dos hebras escriben en la misma consola: la principal cuando pide
+# la letra y la lectora cuando la partida termina sola. Sin este candado
+# los dos textos se meten en la misma linea y quedan revueltos.
+CONSOLA = threading.Lock()
+
+
+def decir(*lineas):
+    """Imprime varias lineas sin que la otra hebra se meta en medio.
+
+    Se usa en vez de un print() suelto cada vez que el mensaje puede
+    coincidir en el tiempo con lo que hace el hilo lector, para que las
+    lineas salgan completas y en orden.
+    """
+    with CONSOLA:
+        for linea in lineas:
+            print(linea)
+
+
+def preguntar(texto):
+    """Escribe el aviso y espera lo que teclee el jugador.
+
+    El aviso se imprime dentro del candado (para no cruzarse con el
+    hilo lector) pero el input() en si queda fuera, porque bloquear la
+    consola mientras se espera a que el jugador escriba dejaria a la
+    otra hebra sin poder avisar nada durante todo ese tiempo.
+    """
+    with CONSOLA:
+        print(texto, end="", flush=True)
+    return input()
 
 
 # ---------------------------------------------------------------------
@@ -86,7 +127,6 @@ def parsear(linea):
     quien llamo a esta funcion decide que hacer con una linea rara.
     """
     if linea.startswith("START:"):
-        
         if len(linea) == 10 and linea[7] == ":":
             modo = linea[6]
             largo = linea[8:10]
@@ -134,9 +174,13 @@ def parsear(linea):
 def lector(puerto, cola, esperando_letra):
     """Arma lineas con lo que llega y las mete en la cola.
 
-    Si la partida termina mientras el jugador esta escribiendo, lo avisa
-    en pantalla; si no, el aviso no aparece hasta que escriba, que es
-    cuando ya no sirve de nada.
+    Si la partida termina mientras el jugador esta escribiendo, el
+    resultado se imprime desde aqui mismo. El hilo principal esta
+    detenido dentro de input() y no puede avisar nada hasta que alguien
+    pulse Enter, asi que el aviso llegaria tarde si se dejara para
+    despues. La linea se marca como ya mostrada (ya_mostrado) para que
+    el hilo principal, cuando por fin la saque de la cola, no la vuelva
+    a imprimir.
 
     Esta funcion corre en un hilo aparte, es decir, al mismo tiempo que
     el resto del programa sigue haciendo lo suyo. Su unico trabajo es
@@ -162,15 +206,23 @@ def lector(puerto, cola, esperando_letra):
                 # a texto y se vacia el acumulador para la siguiente.
                 linea = buffer.decode("ascii", errors="replace")
                 buffer.clear()
+                mostrado = False
                 if linea.startswith("END:") and esperando_letra.is_set():
-                    # Si justo en este momento el jugador esta escribiendo
-                    # su letra, se le avisa de inmediato que la partida
-                    # ya se termino, sin esperar a que termine de escribir.
-                    print("\n  >> la FPGA termino la partida. "
-                          "Pulsa Enter para ver el resultado.")
-                cola.put(("linea", {"texto": linea}))
-            elif byte != 0x0D:                     
-                # El retorno se ignora; cualquier otro byte se
+                    # Justo en este momento el jugador esta escribiendo
+                    # su letra: se le avisa de inmediato del desenlace,
+                    # en vez de esperar a que termine de escribir.
+                    evento = parsear(linea)
+                    if evento is not None:
+                        _, campos = evento
+                        decir("",
+                              f"  {DESENLACES[campos['desenlace']]}",
+                              f"  La palabra era: {campos['palabra']}",
+                              "  Pulsa Enter para seguir.")
+                        mostrado = True
+                cola.put(("linea", {"texto": linea,
+                                    "ya_mostrado": mostrado}))
+            elif byte != 0x0D:
+                # El retorno de carro se ignora; cualquier otro byte se
                 # va sumando a la linea que se esta armando.
                 buffer.append(byte)
                 if len(buffer) > 80:                  # linea absurda: al tacho
@@ -216,19 +268,25 @@ class Estado:
 # ---------------------------------------------------------------------
 # Entrada del jugador
 # ---------------------------------------------------------------------
-def pedir_letra(esperando_letra):
-    """Devuelve una letra A-Z, o None si el jugador quiere salir.
+def pedir_letra(esperando_letra, cola=None):
+    """Devuelve una letra A-Z, None si el jugador quiere salir, o una
+    cadena vacia si la FPGA cerro la partida mientras se escribia.
 
     Vuelve a preguntar cuantas veces haga falta. Nada de lo que escriba
     el jugador llega al puerto sin pasar por aqui.
     """
     while True:
+        # Si la partida ya termino (el hilo lector dejo algo en la
+        # cola) no tiene sentido seguir pidiendo una letra: se devuelve
+        # el turno para que jugar() muestre el resultado.
+        if cola is not None and not cola.empty():
+            return ""
         # Se marca que ahora se esta esperando que el jugador escriba,
         # para que el hilo lector sepa si conviene avisar de inmediato
         # si llega un fin de partida mientras tanto.
         esperando_letra.set()
         try:
-            texto = input("  Letra: ")
+            texto = preguntar("  Letra: ")
         except (EOFError, KeyboardInterrupt):
             print()
             return None
@@ -237,6 +295,12 @@ def pedir_letra(esperando_letra):
             # esta marca al terminar de leer lo que escribio.
             esperando_letra.clear()
 
+        # Puede haber terminado la partida justo mientras se escribia.
+        # En ese caso no se revisa lo tecleado ni se reclama nada: ya
+        # no vale, y ademas el hilo lector ya se encargo de avisar.
+        if cola is not None and not cola.empty():
+            return ""
+
         texto = texto.strip()
 
         # Solo "salir" cierra. Nada de atajos de una letra: la Q es una
@@ -244,20 +308,21 @@ def pedir_letra(esperando_letra):
         if texto.lower() == "salir":
             return None
         if len(texto) == 0:
-            print("  Escribe una letra.")
+            decir("  ")
             continue
         if len(texto) > 1:
-            print("  Solo una letra por turno.")
+            decir("  Solo una letra por turno.")
             continue
 
         letra = texto.upper()
         if not letra.isalpha():
-            print("  Eso no es una letra.")
+            decir("  Eso no es una letra.")
             continue
         if not ("A" <= letra <= "Z"):
-            # El banco de palabras no lleva tildes ni la N con virguilla, asi que la
-            # FPGA solo entiende A-Z y descartaria el byte en silencio.
-            print("  El banco de palabras no usa tildes ni la N con virguilla ")
+            # El banco de palabras no lleva tildes ni la enye, asi que
+            # la FPGA solo entiende A-Z y descartaria el byte en
+            # silencio.
+            decir("  El banco de palabras no usa tildes ni la ñ.")
             continue
 
         return letra
@@ -313,7 +378,8 @@ def jugar(puerto, cola, esperando_letra):
                 if campos["resultado"] == "RPT":
                     # Si la letra estaba repetida, la FPGA no manda nada
                     # mas detras (ni patron ni intentos), asi que aqui
-                    # mismo se cierra esta jugada y se vuelve a preguntar.
+                    # mismo se cierra esta jugada y se vuelve a
+                    # preguntar.
                     print()
                     estado.mostrar()
                     turno = en_partida
@@ -328,9 +394,13 @@ def jugar(puerto, cola, esperando_letra):
                 turno = en_partida
 
             elif clase == "fin":
-                print()
-                print(f"  {DESENLACES[campos['desenlace']]}")
-                print(f"  La palabra era: {campos['palabra']}")
+                # Si la partida termino mientras el jugador escribia, el
+                # hilo lector ya imprimio el resultado; aqui no se
+                # repite para no duplicar el mensaje en pantalla.
+                if not datos.get("ya_mostrado"):
+                    print()
+                    print(f"  {DESENLACES[campos['desenlace']]}")
+                    print(f"  La palabra era: {campos['palabra']}")
                 print("\nElegi el modo en la tarjeta y pulsa el boton derecho")
                 print("para jugar otra vez.\n")
                 estado.reiniciar()
@@ -338,14 +408,19 @@ def jugar(puerto, cola, esperando_letra):
                 turno = False
 
         # ---- turno del jugador ----
-        letra = pedir_letra(esperando_letra)
+        letra = pedir_letra(esperando_letra, cola)
         if letra is None:
             print("Hasta luego.")
             return
+        if letra == "":
+            # La partida termino mientras se escribia; se vuelve al
+            # bucle de arriba para procesar ese fin de partida.
+            turno = False
+            continue
 
-        # Mientras se escribia pudo llegar el final de la partida. En ese
-        # caso la letra ya no vale para nada, asi que se descarta sin
-        # mandarla.
+        # Mientras se escribia pudo llegar el final de la partida. En
+        # ese caso la letra ya no vale para nada, asi que se descarta
+        # sin mandarla.
         if not cola.empty() or not en_partida:
             turno = False
             continue
