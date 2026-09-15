@@ -19,6 +19,8 @@ Vídeo para la defensa: https://youtu.be/WKnffdmOIWA
   <b>Segura Chinchilla Jordi | 2022240646 | jorsegura@estudiantec.cr </b>
 </p>
 
+## El juego
+
 Toda la lógica del juego vive en la FPGA: el banco de palabras, la selección
 pseudoaleatoria, la validación de letras, el temporizador, el conteo de errores y
 la decisión del resultado. La PC solo envía la letra que el jugador escribe y
