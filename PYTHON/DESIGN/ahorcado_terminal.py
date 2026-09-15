@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 ahorcado_terminal.py - Terminal del jugador
 
@@ -39,6 +40,7 @@ Uso
 ---
     pip install pyserial
     python ahorcado_terminal.py --port COM4           (Windows)
+    python ahorcado_terminal.py --port /dev/ttyUSB0   (Linux)
     python ahorcado_terminal.py --list                lista los puertos
 """
 
@@ -221,7 +223,7 @@ def lector(puerto, cola, esperando_letra):
                         mostrado = True
                 cola.put(("linea", {"texto": linea,
                                     "ya_mostrado": mostrado}))
-            elif byte != 0x0D:
+            elif byte != 0x0D:                        # retorno de carro
                 # El retorno de carro se ignora; cualquier otro byte se
                 # va sumando a la linea que se esta armando.
                 buffer.append(byte)
@@ -308,7 +310,7 @@ def pedir_letra(esperando_letra, cola=None):
         if texto.lower() == "salir":
             return None
         if len(texto) == 0:
-            decir("  ")
+            decir(" ")
             continue
         if len(texto) > 1:
             decir("  Solo una letra por turno.")
@@ -322,7 +324,7 @@ def pedir_letra(esperando_letra, cola=None):
             # El banco de palabras no lleva tildes ni la enye, asi que
             # la FPGA solo entiende A-Z y descartaria el byte en
             # silencio.
-            decir("  El banco de palabras no usa tildes ni la ñ.")
+            decir("  El banco de palabras no usa tildes ni la enye.")
             continue
 
         return letra
